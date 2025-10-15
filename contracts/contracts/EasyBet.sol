@@ -24,12 +24,16 @@ contract EasyBet {
         uint256 listedTimestamp;
         string[] choices;
         // ...
-        mapping(address => string) playerChoices;
+        // mapping(address => string) playerChoices;
+        string name;
+        uint256 totalAmount; // 奖池总金额
     }
 
-    uint256 public totalAmount; // 奖池总金额
+    // uint256 public totalAmount; // 奖池总金额
 
     mapping(uint256 => Activity) public activities; // A map from activity-index to its information
+    uint256[] public activitiesActive; // 当前活动ID
+    uint256 public nextActivityId;
     // ...
     // TODO add any variables and functions if you want
 
@@ -58,16 +62,19 @@ contract EasyBet {
     constructor() {
         // maybe you need a constructor
         ticket = new Ticket();
+        points = new Points();
         manager = msg.sender;
     }
 
     // 创建活动，只限管理员
-    function createActivity(uint256 tokenId, string[] memory choices) external onlyManager {
-        require(activities[tokenId].owner == address(0), "Activity with this tokenId already exists");
+    function createActivity(string[] memory choices ,string memory name) external onlyManager {
+        uint256 tokenId = nextActivityId++;
+        activitiesActive.push(tokenId);
         Activity storage activity = activities[tokenId];
         activity.owner = msg.sender;
         activity.listedTimestamp = block.timestamp;
         activity.choices = choices;
+        activity.name = name;
     }
 
     // 参与活动
@@ -77,37 +84,45 @@ contract EasyBet {
         require(ok, "Transfer failed");
 
         // 记录玩家选择
-        activities[activityId].playerChoices[msg.sender] = choice;
+        // activities[activityId].playerChoices[msg.sender] = choice;
 
         // 生成彩票
         ticket.mint(msg.sender, activityId, amount, choice);
 
-        totalAmount += amount;
+        activities[activityId].totalAmount += amount;
     }
 
-    // 交易彩票
+    // 交易彩票（买家调用此函数购买）
     function tradeTicket(uint256 tokenId, address to) public {
-        // 从奖池中获取交易金额
+        // 获取卖家和价格
+        address seller = ticketPool[tokenId].seller;
         uint256 amount = ticketPool[tokenId].price;
-        // 检查卖方是否有彩票，检查买方是否有足够的积分
-        require(msg.sender == ticket.ownerOf(tokenId), "Not the ticket owner");
+        
+        // 检查彩票是否在售
+        require(seller != address(0), "Ticket not for sale");
+        // 检查合约确实托管了这张彩票
+        require(address(this) == ticket.ownerOf(tokenId), "Contract does not hold the ticket");
+        // 检查买家有足够的积分
         require(points.balanceOf(to) >= amount, "Insufficient points");
 
-        // 交易积分
-        bool ok = points.transferFrom(to, msg.sender, amount);
+        // 买家支付积分给卖家
+        bool ok = points.transferFrom(to, seller, amount);
         require(ok, "Transfer failed");
 
-        // 交易彩票
-        ticket.transferFrom(msg.sender, to, tokenId);
+        // 合约将彩票转给买家
+        ticket.transferFrom(address(this), to, tokenId);
 
         // 从彩票池中移除
         removeTicketOnSale(tokenId);
     }
 
-    // 上架彩票
+    // 上架彩票（彩票将被转移到合约托管）
     function listTicket(uint256 tokenId, uint256 price) public {
         require(msg.sender == ticket.ownerOf(tokenId), "Not the ticket owner");
         require(price > 0, "Invalid price");
+
+        // 将彩票转移到合约进行托管
+        ticket.transferFrom(msg.sender, address(this), tokenId);
 
         ticketPool[tokenId] = TicketOnSale({
             tokenId: tokenId,
@@ -126,6 +141,15 @@ contract EasyBet {
         return pool;
     }
 
+    // 获取活动
+    function getActivities() public view returns (Activity[] memory) {
+        Activity[] memory result = new Activity[](activitiesActive.length);
+        for (uint256 i = 0; i < activitiesActive.length; i++) {
+            result[i] = activities[activitiesActive[i]];
+        }
+        return result;
+    }
+
     // 移除彩票池中某元素
     function removeTicketOnSale(uint256 tokenId) internal {
         uint256 length = ticketsOnSale.length;
@@ -142,7 +166,7 @@ contract EasyBet {
     // 结算，发放奖励
     function settle(uint256 activityId, string memory choice_win) public onlyManager() {
         uint256 totalWinners = 0;
-        uint totalPrize = totalAmount;
+        uint totalPrize = activities[activityId].totalAmount;
         address[] memory winners = new address[](ticket.nextTokenId());
 
         // 统计
@@ -161,8 +185,16 @@ contract EasyBet {
             points.transfer(winners[i], prize);
         }
 
-        totalAmount = 0;
         delete activities[activityId];
+        // 从活动列表中移除
+        uint256 length = activitiesActive.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (activitiesActive[i] == activityId) {
+                activitiesActive[i] = activitiesActive[length - 1];
+                activitiesActive.pop();
+                break;
+            }
+        }
     }
 
     function helloworld() pure external returns(string memory) {
