@@ -98,10 +98,6 @@ contract EasyBet {
         address seller = ticketPool[tokenId].seller;
         uint256 amount = ticketPool[tokenId].price;
         
-        // 检查彩票是否在售
-        require(seller != address(0), "Ticket not for sale");
-        // 检查合约确实托管了这张彩票
-        require(address(this) == ticket.ownerOf(tokenId), "Contract does not hold the ticket");
         // 检查买家有足够的积分
         require(points.balanceOf(to) >= amount, "Insufficient points");
 
@@ -116,10 +112,9 @@ contract EasyBet {
         removeTicketOnSale(tokenId);
     }
 
-    // 上架彩票（彩票将被转移到合约托管）
+    // 上架彩票
     function listTicket(uint256 tokenId, uint256 price) public {
         require(msg.sender == ticket.ownerOf(tokenId), "Not the ticket owner");
-        require(price > 0, "Invalid price");
 
         // 将彩票转移到合约进行托管
         ticket.transferFrom(msg.sender, address(this), tokenId);
